@@ -11,9 +11,11 @@ extension Services {
         s.register(Client.self) { c in
             return try c.make(HTTPClient.self)
         }
-        s.register(HTTPClient.self) { c in
+        s.singleton(HTTPClient.self, boot: { c in
             return try .init(eventLoopGroupProvider: .shared(c.eventLoop), configuration: c.make())
-        }
+        }, shutdown: { s in
+            try s.syncShutdown()
+        })
 
         // ws client
         s.register(WebSocketClient.Configuration.self) { c in
@@ -54,8 +56,8 @@ extension Services {
         }
         s.register(MemorySessions.Storage.self) { c in
             let app = try c.make(Application.self)
-            app.lock.lock()
-            defer { app.lock.unlock() }
+            app.sync.lock()
+            defer { app.sync.unlock() }
             let key = "memory-sessions-storage"
             if let existing = app.userInfo[key] as? MemorySessions.Storage {
                 return existing

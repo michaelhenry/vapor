@@ -7,28 +7,40 @@ public final class Application {
     
     public var userInfo: [AnyHashable: Any]
     
-    public let lock: NSLock
+    public let sync: Lock
     
     private let configure: (inout Services) throws -> ()
     
     private let threadPool: NIOThreadPool
     
     private var didShutdown: Bool
+
+    public var running: Running? {
+        get {
+            self.sync.lock()
+            defer { self.sync.unlock() }
+            return self._running
+        }
+        set {
+            self.sync.lock()
+            defer { self.sync.unlock() }
+            self._running = newValue
+        }
+    }
     
-    public var running: Running?
+    private var _running: Running?
     
     public var logger: Logger
 
     private var _services: Services!
     
     public struct Running {
+        public var onStop: EventLoopFuture<Void>
         public var stop: () -> Void
-        public init(stop: @escaping () -> Void) {
-            self.stop = {
-                DispatchQueue.global().async {
-                    stop()
-                }
-            }
+        
+        init(onStop: EventLoopFuture<Void>, stop: @escaping () -> Void) {
+            self.onStop = onStop
+            self.stop = stop
         }
     }
     
@@ -41,7 +53,7 @@ public final class Application {
         self.userInfo = [:]
         self.didShutdown = false
         self.configure = configure
-        self.lock = NSLock()
+        self.sync = Lock()
         self.threadPool = .init(numberOfThreads: 1)
         self.threadPool.start()
         self.logger = .init(label: "codes.vapor.application")
@@ -88,22 +100,24 @@ public final class Application {
         self.logger = .init(label: "codes.vapor.application")
         defer { self.shutdown() }
         do {
-            try self.runCommands()
+            try self.start()
+            if let running = self.running {
+                try running.onStop.wait()
+            }
         } catch {
             self.logger.report(error: error)
             throw error
         }
     }
     
-    public func runCommands() throws {
+    public func start() throws {
         let eventLoop = self.eventLoopGroup.next()
         try self.loadDotEnv(on: eventLoop).wait()
         let c = try self.makeContainer(on: eventLoop).wait()
         defer { c.shutdown() }
         let command = try c.make(Commands.self).group()
         let console = try c.make(Console.self)
-        var runInput = self.environment.commandInput
-        try console.run(command, input: &runInput)
+        try console.run(command, input: self.environment.commandInput)
     }
     
     
