@@ -1,0 +1,13 @@
+osx_image: xcode11
+language: objective-c
+
+jobs:
+  include:
+    - stage: Testing in macos
+      script:
+      - HOMEBREW_NO_AUTO_UPDATE=1 brew install openssl@1.1
+      - |
+        set -eo pipefail &&
+        swift build &&
+        vapor test
+        
